@@ -1,10 +1,11 @@
 use futures_lite::future::block_on;
 use nusb::transfer::RequestBuffer;
 use nusb::Interface;
+use std::cmp::PartialEq;
 use std::thread::sleep;
 use std::time::Duration;
 
-const TIMEOUT: Duration = Duration::from_millis(1);
+const TIMEOUT: Duration = Duration::from_millis(100);
 ///Endpoint for receiving data from printer
 const FROM_DEVICE: u8 = 0x81;
 ///Endpoint for sending data to device
@@ -50,7 +51,7 @@ pub enum PrinterError {
     IncompatibleTape,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum Status {
     StatusRequestReply,
     PrintingComplete,
@@ -60,7 +61,7 @@ pub enum Status {
     PhaseChange,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Phase {
     Waiting,
     Printing,
@@ -85,10 +86,13 @@ impl PrinterStatus {
             .into_result()
             .unwrap();
         sleep(TIMEOUT);
-        let buffer = RequestBuffer::new(32);
-        let response = block_on(handle.bulk_in(FROM_DEVICE, buffer))
-            .into_result()
-            .unwrap();
+        let mut response = Vec::new();
+        while response.is_empty() {
+            let buffer = RequestBuffer::new(32);
+            response = block_on(handle.bulk_in(FROM_DEVICE, buffer))
+                .into_result()
+                .unwrap();
+        }
         let model: PrinterModel;
         match response[4] {
             0x78 => model = PrinterModel::P910BT,
@@ -232,5 +236,56 @@ impl Printer {
 
     pub fn get_status(&self) -> PrinterStatus {
         PrinterStatus::get(&self.handle)
+    }
+
+    pub fn auto_cut(&self, cut: bool) {
+        let mut msg = Vec::from(0x1b694du32.to_be_bytes());
+        if cut {
+            msg.append(&mut Vec::from(0x40u8.to_be_bytes()))
+        } else {
+            msg.append(&mut Vec::from(0x00u8.to_be_bytes()))
+        }
+        msg.remove(0);
+        block_on(self.handle.bulk_out(TO_DEVICE, msg))
+            .into_result()
+            .unwrap();
+    }
+
+    pub fn advanced_settings(&self, half_cut: bool, chain_print: bool) {
+        let mut msg: u8 = 0;
+        if half_cut {
+            msg += 32;
+        }
+        if !chain_print {
+            msg += 16;
+        }
+        block_on(
+            self.handle
+                .bulk_out(TO_DEVICE, Vec::from(msg.to_be_bytes())),
+        )
+        .into_result()
+        .unwrap();
+    }
+
+    pub fn print(&self, text: &str) {
+        //36mm is 454 dots
+        let mut msg = Vec::from(0x474646u32.to_be_bytes());
+        msg.remove(0);
+        msg.append(&mut Vec::from([0xFFu8; 0x70]));
+        let mut a = 0;
+        while a < 1000 {
+            block_on(self.handle.bulk_out(TO_DEVICE, msg.clone()))
+                .into_result()
+                .unwrap();
+            a += 1;
+        }
+        let b =0;
+        //Print and feeed
+        block_on(
+            self.handle
+                .bulk_out(TO_DEVICE, Vec::from(0x1au8.to_be_bytes())),
+        )
+        .into_result()
+        .unwrap();
     }
 }

@@ -57,5 +57,11 @@ fn netbox() -> Result<(), Error> {
 fn main() {
     let printer = ptouch::Printer::init();
     println!("Hello {:?}", printer.model);
-    println!("Status {:?}", printer.get_status())
+    println!("Status {:?}", printer.get_status());
+    printer.auto_cut(true);
+    printer.advanced_settings(false, true);
+    printer.print("Hello");
+    println!("Status {:?}", printer.get_status());
+    println!("Status {:?}", printer.get_status());
+    println!("Status {:?}", printer.get_status());
 }
